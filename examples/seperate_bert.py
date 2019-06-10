@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # coding=utf-8
 # Copyright 2018 The Google AI Language Team Authors and The HugginFace Inc. team.
 # Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
@@ -19,7 +21,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
+import sys,os,io
 import logging
 import argparse
 from tqdm import tqdm, trange
@@ -30,16 +32,36 @@ from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 
 from pytorch_pretrained_bert.tokenization import BertTokenizer
-from pytorch_pretrained_bert.modeling import BertForPreTraining
+from pytorch_pretrained_bert.modeling import BertAttention, BertForPreTraining, BertLayer, BertOutput, \
+                                            BertIntermediate, BertSelfAttention, BertSelfOutput,BertLayerNorm
 from pytorch_pretrained_bert.optimization import BertAdam
 
+from torch import nn
 from torch.utils.data import Dataset
 import random
+
+
+# Set PATHs
+PATH_TO_SENTEVAL = '/home/xiongyi/Codes/SentEval/examples'
+PATH_TO_DATA = os.path.join(PATH_TO_SENTEVAL,'../data')
+# PATH_TO_VEC = 'glove/glove.840B.300d.txt'
+#PATH_TO_VEC = os.path.join(PATH_TO_DATA,'glove/glove.840B.300d.txt')
+
+# import SentEval
+sys.path.insert(0, PATH_TO_SENTEVAL)
+import senteval
+
+
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
+fh = logging.FileHandler('DeBERT.log')
+fh.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+fh.setFormatter(formatter)
+logger.addHandler(fh)
 
 
 def warmup_linear(x, warmup=0.002):
@@ -406,6 +428,99 @@ def convert_example_to_features(example, max_seq_length, tokenizer):
     return features
 
 
+def DisentangleModel(model):
+    #modify the architecture, delete the last layer and add back a layer with
+    #two independent components.
+    
+    bm = next(model.children())
+    #drop the last layer
+    bm.encoder.layer = bm.encoder.layer[:-1]
+    #add back a "disentangled" layer
+    new_layer = BertDELayer(model.config)
+    bm.encoder.layer.append(new_layer)
+    return model
+    #self_attention_layer
+    
+class BertDEAttention(nn.Module):
+    #self stays the same, output needs modification
+    def __init__(self, config):
+        super(BertDEAttention, self).__init__()
+        self.self = BertSelfAttention(config)
+        self.output1 = BertDESelfOutput(config)
+        self.output2 = BertDESelfOutput(config)
+        self.size = config.hidden_size
+        
+    def forward(self, input_tensor, attention_mask):
+        self_output = self.self(input_tensor, attention_mask)
+        #print ('self_output.shape', self_output.shape)
+        attention_output1 = self.output1(self_output[:,:,0:int(self.size/2)], input_tensor)
+        attention_output2 = self.output2(self_output[:,:,int(self.size/2):], input_tensor)
+        return attention_output1, attention_output2
+
+class BertDESelfOutput(nn.Module):
+    #size = half, also drop the residual connection
+    def __init__(self, config):
+        super(BertDESelfOutput, self).__init__()
+        self.dense = nn.Linear(int(config.hidden_size/2), int(config.hidden_size/2))
+        self.LayerNorm = BertLayerNorm(int(config.hidden_size/2), eps=1e-12)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+    def forward(self, hidden_states, input_tensor):
+        hidden_states = self.dense(hidden_states)
+        hidden_states = self.dropout(hidden_states)
+        hidden_states = self.LayerNorm(hidden_states)
+        return hidden_states
+
+
+class BertDELayer(nn.Module):
+    def __init__(self, config):
+        super(BertDELayer, self).__init__()
+        self.attention = BertDEAttention(config)
+        
+        half_config = config
+        half_config.hidden_size = int(config.hidden_size/2)
+        half_config.intermediate_size = int(config.intermediate_size/2)
+        self.intermediate1 = BertIntermediate(half_config)
+        self.intermediate2 = BertIntermediate(half_config)
+        
+        self.output1 = BertOutput(half_config)
+        self.output2 = BertOutput(half_config)
+    def forward(self, hidden_states, attention_mask):
+        attention_output1, attention_output2 = self.attention(hidden_states, attention_mask)
+        intermediate_output1 = self.intermediate1(attention_output1)
+        intermediate_output2 = self.intermediate2(attention_output2)
+        
+        layer_output1 = self.output1(intermediate_output1, attention_output1)
+        layer_output2 = self.output2(intermediate_output2, attention_output2)
+        #print ('layer_output1.shape :', layer_output1.shape)
+        return torch.cat((layer_output1, layer_output2), -1)
+
+
+# SentEval prepare and batcher
+def prepare(params, samples):
+    return
+
+def batcher(params, batch):
+    batch = [sent if sent != [] else ['.'] for sent in batch]
+    print ('batch_size ' , len(batch))
+    embeddings = []
+
+    for sent in batch:
+        sentvec = []
+        for word in sent:
+            if word in params.word_vec:
+                sentvec.append(params.word_vec[word])
+        if not sentvec:
+            vec = np.zeros(params.wvec_dim)
+            sentvec.append(vec)
+        sentvec = np.mean(sentvec, 0)
+        embeddings.append(sentvec)
+
+    embeddings = np.vstack(embeddings)
+    return embeddings
+
+
+
 def main():
     parser = argparse.ArgumentParser()
 
@@ -488,8 +603,9 @@ def main():
                         "0 (default value): dynamic loss scaling.\n"
                         "Positive power of 2: static loss scaling value.\n")
 
-    args = parser.parse_args()
-
+    #args = parser.parse_args()
+    args = parser.parse_args(["--train_file","/home/xiongyi/Data/Corpus/small_wiki_sentence_corpus.txt","--do_train","--do_eval","--bert_model",\
+                              "bert-base-uncased","--output_dir","june9"])
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
         n_gpu = torch.cuda.device_count()
@@ -534,6 +650,8 @@ def main():
 
     # Prepare model
     model = BertForPreTraining.from_pretrained(args.bert_model)
+    model = DisentangleModel(model)
+    
     if args.fp16:
         model.half()
     model.to(device)
@@ -546,13 +664,6 @@ def main():
     elif n_gpu > 1:
         model = torch.nn.DataParallel(model)
 
-
-    #######Modify the architecture here!
-
-    
-    
-    
-    
     
     # Prepare optimizer
     param_optimizer = list(model.named_parameters())
@@ -632,6 +743,24 @@ def main():
         output_model_file = os.path.join(args.output_dir, "pytorch_model.bin")
         if args.do_train:
             torch.save(model_to_save.state_dict(), output_model_file)
+            
+        model.eval()  
+        ##use probing/downstream_tasks to evaluate the model
+
+        # Set params for SentEval
+        params_senteval = {'task_path': PATH_TO_DATA, 'usepytorch': True, 'kfold': 5}
+        params_senteval['classifier'] = {'nhid': 0, 'optim': 'rmsprop', 'batch_size': 32,
+                                         'tenacity': 3, 'epoch_size': 2}
+        se = senteval.engine.SE(params_senteval, batcher, prepare)
+        transfer_tasks = ['STS12', 'STS13', 'STS14', 'STS15', 'STS16',
+                      'MR', 'CR', 'MPQA', 'SUBJ', 'SST2', 'SST5', 'TREC', 'MRPC',
+                      'SICKEntailment', 'SICKRelatedness', 'STSBenchmark',
+                      'Length', 'WordContent', 'Depth', 'TopConstituents',
+                      'BigramShift', 'Tense', 'SubjNumber', 'ObjNumber',
+                      'OddManOut', 'CoordinationInversion']
+        results = se.eval(transfer_tasks)
+        print(results)
+
 
 
 def _truncate_seq_pair(tokens_a, tokens_b, max_length):
@@ -658,3 +787,5 @@ def accuracy(out, labels):
 
 if __name__ == "__main__":
     main()
+
+
