@@ -21,7 +21,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
+import sys,os,io
 import logging
 import argparse
 from tqdm import tqdm, trange
@@ -39,6 +39,19 @@ from pytorch_pretrained_bert.optimization import BertAdam
 from torch import nn
 from torch.utils.data import Dataset
 import random
+
+
+# Set PATHs
+PATH_TO_SENTEVAL = '/home/xiongyi/Codes/SentEval/examples'
+PATH_TO_DATA = os.path.join(PATH_TO_SENTEVAL,'../data')
+# PATH_TO_VEC = 'glove/glove.840B.300d.txt'
+#PATH_TO_VEC = os.path.join(PATH_TO_DATA,'glove/glove.840B.300d.txt')
+
+# import SentEval
+sys.path.insert(0, PATH_TO_SENTEVAL)
+import senteval
+
+
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -483,6 +496,30 @@ class BertDELayer(nn.Module):
         return torch.cat((layer_output1, layer_output2), -1)
 
 
+# SentEval prepare and batcher
+def prepare(params, samples):
+    return
+
+def batcher(params, batch):
+    batch = [sent if sent != [] else ['.'] for sent in batch]
+    print ('batch_size ' , len(batch))
+    embeddings = []
+
+    for sent in batch:
+        sentvec = []
+        for word in sent:
+            if word in params.word_vec:
+                sentvec.append(params.word_vec[word])
+        if not sentvec:
+            vec = np.zeros(params.wvec_dim)
+            sentvec.append(vec)
+        sentvec = np.mean(sentvec, 0)
+        embeddings.append(sentvec)
+
+    embeddings = np.vstack(embeddings)
+    return embeddings
+
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -706,6 +743,24 @@ def main():
         output_model_file = os.path.join(args.output_dir, "pytorch_model.bin")
         if args.do_train:
             torch.save(model_to_save.state_dict(), output_model_file)
+            
+        model.eval()  
+        ##use probing/downstream_tasks to evaluate the model
+
+        # Set params for SentEval
+        params_senteval = {'task_path': PATH_TO_DATA, 'usepytorch': True, 'kfold': 5}
+        params_senteval['classifier'] = {'nhid': 0, 'optim': 'rmsprop', 'batch_size': 32,
+                                         'tenacity': 3, 'epoch_size': 2}
+        se = senteval.engine.SE(params_senteval, batcher, prepare)
+        transfer_tasks = ['STS12', 'STS13', 'STS14', 'STS15', 'STS16',
+                      'MR', 'CR', 'MPQA', 'SUBJ', 'SST2', 'SST5', 'TREC', 'MRPC',
+                      'SICKEntailment', 'SICKRelatedness', 'STSBenchmark',
+                      'Length', 'WordContent', 'Depth', 'TopConstituents',
+                      'BigramShift', 'Tense', 'SubjNumber', 'ObjNumber',
+                      'OddManOut', 'CoordinationInversion']
+        results = se.eval(transfer_tasks)
+        print(results)
+
 
 
 def _truncate_seq_pair(tokens_a, tokens_b, max_length):
