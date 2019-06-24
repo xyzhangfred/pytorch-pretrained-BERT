@@ -12,7 +12,7 @@ import io
 import numpy as np
 import logging
 from logging.handlers import WatchedFileHandler
-logging.basicConfig(filename = 'zero_out_heads_seclay.log',format='%(asctime)s : %(message)s', level=logging.DEBUG)
+logging.basicConfig(filename = 'full_bert_2.log',format='%(asctime)s : %(message)s', level=logging.DEBUG)
 
 
 import torch
@@ -110,8 +110,8 @@ def batcher(params, batch):
 
     features = convert_examples_to_features(examples, params['bert'].seq_length, tokenizer)
     
-    all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
-    all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
+    all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long).to(params['bert'].device)
+    all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long).to(params['bert'].device)
     
     all_encoder_layers, _ = params['bert'](all_input_ids, token_type_ids=None, attention_mask=all_input_mask)
    
@@ -126,11 +126,11 @@ def batcher(params, batch):
     ##apply self-attention to it
     
     
-    extended_attention_mask = all_input_mask.cuda().unsqueeze(1).unsqueeze(2)
+    extended_attention_mask = all_input_mask.unsqueeze(1).unsqueeze(2)
     extended_attention_mask = extended_attention_mask.to(dtype=next(params['bert'].parameters()).dtype)
     extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
     #print ('here?')
-    embeddings = next(params['bert'].children()).encoder.layer[params['bert'].layer_no].attention.self(prev_out, extended_attention_mask)
+    embeddings = params['bert'].encoder.layer[params['bert'].layer_no].attention.self(prev_out, extended_attention_mask)
     ##do mean/max pooling
     
     #print ('befor shape', embeddings.shape)
@@ -143,9 +143,9 @@ def batcher(params, batch):
            
             embeddings[:,:,params['bert'].notrandidx] = 0
     #do the following calculation
-    attention_output = next(params['bert'].children()).encoder.layer[params['bert'].layer_no].attention.output(embeddings, prev_out)
-    intermediate_output = next(params['bert'].children()).encoder.layer[params['bert'].layer_no].intermediate(attention_output)
-    layer_output = next(params['bert'].children()).encoder.layer[params['bert'].layer_no].output(intermediate_output, attention_output)
+    attention_output = params['bert'].encoder.layer[params['bert'].layer_no].attention.output(embeddings, prev_out)
+    intermediate_output =params['bert'].encoder.layer[params['bert'].layer_no].intermediate(attention_output)
+    layer_output = params['bert'].encoder.layer[params['bert'].layer_no].output(intermediate_output, attention_output)
     
     final_embeddings = layer_output.detach().mean(1).cpu().numpy()
     
@@ -173,7 +173,7 @@ def main(head_no = None):
                             "than this will be truncated, and sequences shorter than this will be padded.")
     parser.add_argument("--local_rank",
                         type=int,
-                        default=-1,
+                        default=1,
                         help = "local_rank for distributed training on gpus")
     parser.add_argument("--no_cuda",
                         action='store_true',
@@ -192,15 +192,17 @@ def main(head_no = None):
         device = torch.device("cuda", args.local_rank)
         n_gpu = 1
         # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
-        torch.distributed.init_process_group(backend='nccl')
+        #torch.distributed.init_process_group(backend='nccl')
     logging.info('\nDoing head number '+str(head_no) + '!\n')
     model = BertModel.from_pretrained(args.bert_model)
     model.to(device)
-    if args.local_rank != -1:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank],
-                                                          output_device=args.local_rank)
-    elif n_gpu > 1:
-        model = torch.nn.DataParallel(model)
+    #if args.local_rank != -1:
+    #    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank],
+    #                                                      output_device=args.local_rank)
+    #elif n_gpu > 1:
+    #    model = torch.nn.DataParallel(model)
+    
+    
     model.eval()
     tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
 
@@ -210,11 +212,14 @@ def main(head_no = None):
     params_senteval['bert'].head_no = head_no
     params_senteval['bert'].randidx = np.random.choice(np.arange(768), size = 64, replace=False)
     params_senteval['bert'].notrandidx = [i for i in range(768) if i not in params_senteval['bert'].randidx] 
+    params_senteval['bert'].device = device
+
+    
     
     se = senteval.engine.SE(params_senteval, batcher, prepare)
-    transfer_tasks = ['STS12','SICKEntailment','Length', 'WordContent', 'Depth', 'TopConstituents',
-                      'BigramShift', 'Tense', 'SubjNumber', 'ObjNumber',
-                      'OddManOut', 'CoordinationInversion']
+    transfer_tasks = ['STS13', 'STS14', 'STS15', 'STS16',
+                  'MR', 'CR', 'MPQA', 'SUBJ', 'SST2', 'SST5', 'TREC', 'MRPC',
+                  'SICKRelatedness', 'STSBenchmark']
     results = se.eval(transfer_tasks)
     print(results)
     
@@ -222,8 +227,8 @@ def main(head_no = None):
 
 if __name__ == "__main__":
     main()
-    for head_no in range(12):
-        main(head_no)
+    #for head_no in range(12):
+    #    main(head_no)
 
-    main('random')
+    #main('random')
 

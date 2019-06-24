@@ -8,22 +8,24 @@ Created on Wed May 29 14:29:33 2019
 import re
 import numpy as np
 
-filename = '/home/xiongyi/Codes/pytorch-pretrained-BERT/examples/zero_out_heads_seclay.log'
-
+filename = '/home/xiongyi/Codes/pytorch-pretrained-BERT/examples/11_06_00_02DeBERT_root.log'
+res = []
 with open(filename ,'r') as fd:
-    line = fd.readline()
-    heads = []
-    head_count = -1
+    line = fd.readline()    
     while (line):
-        if (re.findall(r"Doing head number", line)):
-            heads.append([])
-            head_count += 1
-        pear = re.findall(r"ALL \(average\) : Pearson = (.*),", line)
+        pear = re.findall(r"Pearson = (.*),", line)
+        #print (pear)
         if (len(pear) >0):
-            heads[head_count].append(pear[0])            
+            res.append(pear[0])            
         accs = re.findall(r"Test acc : (.*) for (.*)", line)
         if (len(accs) >0):
-            heads[head_count].append(accs[0][0])
+            #res.append(accs[0][1] + ':' + accs[0][0])
+            res.append(accs[0][0])
         line = fd.readline()          
-        
-res_mat = np.asanyarray(heads)
+tasks = ['STS12', 'STS13', 'STS14', 'STS15', 'STS16',
+                  'MR', 'CR', 'MPQA', 'SUBJ', 'SST2', 'SST5', 'TREC', 'MRPC',
+                  'SICKEntailment', 'SICKRelatedness', 'STSBenchmark',
+                  'Length', 'WordContent', 'Depth', 'TopConstituents',
+                  'BigramShift', 'Tense', 'SubjNumber', 'ObjNumber',
+                  'OddManOut', 'CoordinationInversion']
+#res_mat = np.asanyarray(heads)

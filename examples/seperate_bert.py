@@ -23,6 +23,19 @@ from __future__ import print_function
 
 import sys,os,io
 import logging
+from datetime import datetime
+
+now = datetime.now()
+dt_string = now.strftime("%d_%m_%H_%M")
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',level=logging.DEBUG, filename= dt_string + 'DeBERT_root.log')
+
+fh = logging.FileHandler(dt_string + 'DeBERT_with_res.log')
+fh.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+fh.setFormatter(formatter)
+logging.getLogger('').addHandler(fh)
+
+logger = logging.getLogger(__name__)
 import argparse
 from tqdm import tqdm, trange
 
@@ -35,6 +48,9 @@ from pytorch_pretrained_bert.tokenization import BertTokenizer
 from pytorch_pretrained_bert.modeling import BertAttention, BertForPreTraining, BertLayer, BertOutput, \
                                             BertIntermediate, BertSelfAttention, BertSelfOutput,BertLayerNorm
 from pytorch_pretrained_bert.optimization import BertAdam
+
+from extract_features import convert_examples_to_features, InputExample
+from extract_features import InputExample as IE
 
 from torch import nn
 from torch.utils.data import Dataset
@@ -50,18 +66,6 @@ PATH_TO_DATA = os.path.join(PATH_TO_SENTEVAL,'../data')
 # import SentEval
 sys.path.insert(0, PATH_TO_SENTEVAL)
 import senteval
-
-
-
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                    datefmt='%m/%d/%Y %H:%M:%S',
-                    level=logging.INFO)
-logger = logging.getLogger(__name__)
-fh = logging.FileHandler('DeBERT.log')
-fh.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-fh.setFormatter(formatter)
-logger.addHandler(fh)
 
 
 def warmup_linear(x, warmup=0.002):
@@ -468,7 +472,7 @@ class BertDESelfOutput(nn.Module):
     def forward(self, hidden_states, input_tensor):
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states)
+        hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
 
 
@@ -498,26 +502,36 @@ class BertDELayer(nn.Module):
 
 # SentEval prepare and batcher
 def prepare(params, samples):
+    params.batch_size = 32
     return
 
 def batcher(params, batch):
+    #print ('batch size' ,len(batch))
     batch = [sent if sent != [] else ['.'] for sent in batch]
-    print ('batch_size ' , len(batch))
-    embeddings = []
-
+    batch = [' '.join(sent) for sent in batch]
+    #print ('batch', batch)
+    examples = []
+    unique_id = 0
+    #print ('batch size ', len(batch))
     for sent in batch:
-        sentvec = []
-        for word in sent:
-            if word in params.word_vec:
-                sentvec.append(params.word_vec[word])
-        if not sentvec:
-            vec = np.zeros(params.wvec_dim)
-            sentvec.append(vec)
-        sentvec = np.mean(sentvec, 0)
-        embeddings.append(sentvec)
+        sent = sent.strip()
+        text_b = None
+        text_a = sent
+        examples.append(
+            IE(unique_id=unique_id, text_a=text_a, text_b=text_b))
+        unique_id += 1
 
-    embeddings = np.vstack(embeddings)
-    return embeddings
+    features = convert_examples_to_features(examples, 128, params['DEbert'].tokenizer)
+    all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long).to(params['DEbert'].device)
+    all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long).to(params['DEbert'].device)
+    
+    embeddings, _ = params['DEbert'](all_input_ids, token_type_ids=None, \
+                                  attention_mask=all_input_mask)
+    
+    #print ('embeddings[-1].shape ', embeddings[-1].shape)
+    final_embeddings = embeddings[-1].detach().mean(1).cpu().numpy()
+    
+    return final_embeddings
 
 
 
@@ -604,17 +618,21 @@ def main():
                         "Positive power of 2: static loss scaling value.\n")
 
     #args = parser.parse_args()
-    args = parser.parse_args(["--train_file","/home/xiongyi/Data/Corpus/small_wiki_sentence_corpus.txt","--do_train","--do_eval","--bert_model",\
-                              "bert-base-uncased","--output_dir","june9"])
+    args = parser.parse_args(["--train_file","/home/xiongyi/Data/Corpus/small_wiki_sentence_corpus.txt","--do_eval","--bert_model",\
+                              "bert-base-uncased","--output_dir","june10"])
+    
+    
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
-        n_gpu = torch.cuda.device_count()
+        #n_gpu = torch.cuda.device_count()
+        device = torch.device("cuda", 1)
+        n_gpu = 1
     else:
         torch.cuda.set_device(args.local_rank)
         device = torch.device("cuda", args.local_rank)
         n_gpu = 1
         # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
-        torch.distributed.init_process_group(backend='nccl')
+        torch.distributed.init_process_group(backend='nccl', rank = 1, world_size=2)
     logger.info("device: {} n_gpu: {}, distributed training: {}, 16-bits training: {}".format(
         device, n_gpu, bool(args.local_rank != -1), args.fp16))
 
@@ -623,7 +641,6 @@ def main():
                             args.gradient_accumulation_steps))
 
     args.train_batch_size = int(args.train_batch_size / args.gradient_accumulation_steps)
-
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -744,22 +761,27 @@ def main():
         if args.do_train:
             torch.save(model_to_save.state_dict(), output_model_file)
             
-        model.eval()  
-        ##use probing/downstream_tasks to evaluate the model
+    model.eval()  
+    new_model = next(model.children())
+    ##use probing/downstream_tasks to evaluate the model
 
-        # Set params for SentEval
-        params_senteval = {'task_path': PATH_TO_DATA, 'usepytorch': True, 'kfold': 5}
-        params_senteval['classifier'] = {'nhid': 0, 'optim': 'rmsprop', 'batch_size': 32,
-                                         'tenacity': 3, 'epoch_size': 2}
-        se = senteval.engine.SE(params_senteval, batcher, prepare)
-        transfer_tasks = ['STS12', 'STS13', 'STS14', 'STS15', 'STS16',
-                      'MR', 'CR', 'MPQA', 'SUBJ', 'SST2', 'SST5', 'TREC', 'MRPC',
-                      'SICKEntailment', 'SICKRelatedness', 'STSBenchmark',
-                      'Length', 'WordContent', 'Depth', 'TopConstituents',
-                      'BigramShift', 'Tense', 'SubjNumber', 'ObjNumber',
-                      'OddManOut', 'CoordinationInversion']
-        results = se.eval(transfer_tasks)
-        print(results)
+    # Set params for SentEval
+    params_senteval = {'task_path': PATH_TO_DATA, 'usepytorch': True, 'kfold': 5}
+    params_senteval['classifier'] = {'nhid': 0, 'optim': 'rmsprop', 'batch_size': 32,
+                                     'tenacity': 3, 'epoch_size': 2}
+    
+    params_senteval['DEbert']=new_model
+    params_senteval['DEbert'].tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
+    params_senteval['DEbert'].device = device
+    se = senteval.engine.SE(params_senteval, batcher, prepare)
+    transfer_tasks = ['STS12', 'STS13', 'STS14', 'STS15', 'STS16',
+                  'MR', 'CR', 'MPQA', 'SUBJ', 'SST2', 'SST5', 'TREC', 'MRPC',
+                  'SICKEntailment', 'SICKRelatedness', 'STSBenchmark',
+                  'Length', 'WordContent', 'Depth', 'TopConstituents',
+                  'BigramShift', 'Tense', 'SubjNumber', 'ObjNumber',
+                  'OddManOut', 'CoordinationInversion']
+    results = se.eval(transfer_tasks)
+    print(results)
 
 
 
