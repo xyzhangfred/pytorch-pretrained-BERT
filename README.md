@@ -1,623 +1,379 @@
-# PyTorch Pretrained Bert
+# 👾 PyTorch-Transformers
 
-[![CircleCI](https://circleci.com/gh/huggingface/pytorch-pretrained-BERT.svg?style=svg)](https://circleci.com/gh/huggingface/pytorch-pretrained-BERT)
+[![CircleCI](https://circleci.com/gh/huggingface/pytorch-transformers.svg?style=svg)](https://circleci.com/gh/huggingface/pytorch-transformers)
 
-This repository contains an op-for-op PyTorch reimplementation of [Google's TensorFlow repository for the BERT model](https://github.com/google-research/bert) that was released together with the paper [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://arxiv.org/abs/1810.04805) by Jacob Devlin, Ming-Wei Chang, Kenton Lee and Kristina Toutanova.
+PyTorch-Transformers (formely known as `pytorch-pretrained-bert`) is a library of state-of-the-art pre-trained models for Natural Language Processing (NLP).
 
-This implementation is provided with [Google's pre-trained models](https://github.com/google-research/bert), examples, notebooks and a command-line interface to load any pre-trained TensorFlow checkpoint for BERT is also provided.
+The library currently contains PyTorch implementations, pre-trained model weights, usage scripts and conversion utilities for the following models:
 
-## Content
+1. **[BERT](https://github.com/google-research/bert)** (from Google) released with the paper [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://arxiv.org/abs/1810.04805) by Jacob Devlin, Ming-Wei Chang, Kenton Lee and Kristina Toutanova.
+2. **[GPT](https://github.com/openai/finetune-transformer-lm)** (from OpenAI) released with the paper [Improving Language Understanding by Generative Pre-Training](https://blog.openai.com/language-unsupervised/) by Alec Radford, Karthik Narasimhan, Tim Salimans and Ilya Sutskever.
+3. **[GPT-2](https://blog.openai.com/better-language-models/)** (from OpenAI) released with the paper [Language Models are Unsupervised Multitask Learners](https://blog.openai.com/better-language-models/) by Alec Radford*, Jeffrey Wu*, Rewon Child, David Luan, Dario Amodei** and Ilya Sutskever**.
+4. **[Transformer-XL](https://github.com/kimiyoung/transformer-xl)** (from Google/CMU) released with the paper [Transformer-XL: Attentive Language Models Beyond a Fixed-Length Context](https://arxiv.org/abs/1901.02860) by Zihang Dai*, Zhilin Yang*, Yiming Yang, Jaime Carbonell, Quoc V. Le, Ruslan Salakhutdinov.
+5. **[XLNet](https://github.com/zihangdai/xlnet/)** (from Google/CMU) released with the paper [​XLNet: Generalized Autoregressive Pretraining for Language Understanding](https://arxiv.org/abs/1906.08237) by Zhilin Yang*, Zihang Dai*, Yiming Yang, Jaime Carbonell, Ruslan Salakhutdinov, Quoc V. Le.
+6. **[XLM](https://github.com/facebookresearch/XLM/)** (from Facebook) released together with the paper [Cross-lingual Language Model Pretraining](https://arxiv.org/abs/1901.07291) by Guillaume Lample and Alexis Conneau.
+
+These implementations have been tested on several datasets (see the example scripts) and should match the performances of the original implementations (e.g. ~93 F1 on SQuAD for BERT Whole-Word-Masking, ~88 F1 on RocStories for OpenAI GPT, ~18.3 perplexity on WikiText 103 for Transformer-XL, ~0.916 Peason R coefficient on STS-B for XLNet). You can find more details on the performances in the Examples section of the [documentation](https://huggingface.co/pytorch-transformers/examples.html).
 
 | Section | Description |
 |-|-|
 | [Installation](#installation) | How to install the package |
-| [Overview](#overview) | Overview of the package |
-| [Usage](#usage) | Quickstart examples |
-| [Doc](#doc) |  Detailed documentation |
-| [Examples](#examples) | Detailed examples on how to fine-tune Bert |
-| [Notebooks](#notebooks) | Introduction on the provided Jupyter Notebooks |
-| [TPU](#tpu) | Notes on TPU support and pretraining scripts |
-| [Command-line interface](#Command-line-interface) | Convert a TensorFlow checkpoint in a PyTorch dump |
+| [Quick tour: Usage](#quick-tour-usage) | Tokenizers & models usage: Bert and GPT-2 |
+| [Quick tour: Fine-tuning/usage scripts](#quick-tour-fine-tuningusage-scripts) | Using provided scripts: GLUE, SQuAD and Text generation |
+| [Migrating from pytorch-pretrained-bert to pytorch-transformers](#Migrating-from-pytorch-pretrained-bert-to-pytorch-transformers) | Migrating your code from pytorch-pretrained-bert to pytorch-transformers |
+| [Documentation](https://huggingface.co/pytorch-transformers/) | Full API documentation and more |
 
 ## Installation
 
-This repo was tested on Python 3.5+ and PyTorch 0.4.1/1.0.0
+This repo is tested on Python 2.7 and 3.5+ (examples are tested only on python 3.5+) and PyTorch 0.4.1 to 1.1.0
 
 ### With pip
 
-PyTorch pretrained bert can be installed by pip as follows:
+PyTorch-Transformers can be installed by pip as follows:
+
 ```bash
-pip install pytorch-pretrained-bert
+pip install pytorch-transformers
 ```
 
 ### From source
 
 Clone the repository and run:
+
 ```bash
 pip install [--editable] .
 ```
 
-A series of tests is included in the [tests folder](https://github.com/huggingface/pytorch-pretrained-BERT/tree/master/tests) and can be run using `pytest` (install pytest if needed: `pip install pytest`).
+### Tests
 
-You can run the tests with the command:
+A series of tests is included for the library and the example scripts. Library tests can be found in the [tests folder](https://github.com/huggingface/pytorch-transformers/tree/master/pytorch_transformers/tests) and examples tests in the [examples folder](https://github.com/huggingface/pytorch-transformers/tree/master/examples).
+
+These tests can be run using `pytest` (install pytest if needed with `pip install pytest`).
+
+You can run the tests from the root of the cloned repository with the commands:
+
 ```bash
-python -m pytest -sv tests/
+python -m pytest -sv ./pytorch_transformers/tests/
+python -m pytest -sv ./examples/
 ```
 
-## Overview
+## Quick tour
 
-This package comprises the following classes that can be imported in Python and are detailed in the [Doc](#doc) section of this readme:
-
-- Eight PyTorch models (`torch.nn.Module`) for Bert with pre-trained weights (in the [`modeling.py`](./pytorch_pretrained_bert/modeling.py) file):
-  - [`BertModel`](./pytorch_pretrained_bert/modeling.py#L537) - raw BERT Transformer model (**fully pre-trained**),
-  - [`BertForMaskedLM`](./pytorch_pretrained_bert/modeling.py#L691) - BERT Transformer with the pre-trained masked language modeling head on top (**fully pre-trained**),
-  - [`BertForNextSentencePrediction`](./pytorch_pretrained_bert/modeling.py#L752) - BERT Transformer with the pre-trained next sentence prediction classifier on top  (**fully pre-trained**),
-  - [`BertForPreTraining`](./pytorch_pretrained_bert/modeling.py#L620) - BERT Transformer with masked language modeling head and next sentence prediction classifier on top (**fully pre-trained**),
-  - [`BertForSequenceClassification`](./pytorch_pretrained_bert/modeling.py#L814) - BERT Transformer with a sequence classification head on top (BERT Transformer is **pre-trained**, the sequence classification head **is only initialized and has to be trained**),
-  - [`BertForMultipleChoice`](./pytorch_pretrained_bert/modeling.py#L880) - BERT Transformer with a multiple choice head on top (used for task like Swag) (BERT Transformer is **pre-trained**, the multiple choice classification head **is only initialized and has to be trained**),
-  - [`BertForTokenClassification`](./pytorch_pretrained_bert/modeling.py#L949) - BERT Transformer with a token classification head on top (BERT Transformer is **pre-trained**, the token classification head **is only initialized and has to be trained**),
-  - [`BertForQuestionAnswering`](./pytorch_pretrained_bert/modeling.py#L1015) - BERT Transformer with a token classification head on top (BERT Transformer is **pre-trained**, the token classification head **is only initialized and has to be trained**).
-
-- Three tokenizers (in the [`tokenization.py`](./pytorch_pretrained_bert/tokenization.py) file):
-  - `BasicTokenizer` - basic tokenization (punctuation splitting, lower casing, etc.),
-  - `WordpieceTokenizer` - WordPiece tokenization,
-  - `BertTokenizer` - perform end-to-end tokenization, i.e. basic tokenization followed by WordPiece tokenization.
-
-- One optimizer (in the [`optimization.py`](./pytorch_pretrained_bert/optimization.py) file):
-  - `BertAdam` - Bert version of Adam algorithm with weight decay fix, warmup and linear decay of the learning rate.
-
-- A configuration class (in the [`modeling.py`](./pytorch_pretrained_bert/modeling.py) file):
-  - `BertConfig` - Configuration class to store the configuration of a `BertModel` with utilities to read and write from JSON configuration files.
-
-The repository further comprises:
-
-- Five examples on how to use Bert (in the [`examples` folder](./examples)):
-  - [`extract_features.py`](./examples/extract_features.py) - Show how to extract hidden states from an instance of `BertModel`,
-  - [`run_classifier.py`](./examples/run_classifier.py) - Show how to fine-tune an instance of `BertForSequenceClassification` on GLUE's MRPC task,
-  - [`run_squad.py`](./examples/run_squad.py) - Show how to fine-tune an instance of `BertForQuestionAnswering` on SQuAD v1.0 task.
-  - [`run_swag.py`](./examples/run_swag.py) - Show how to fine-tune an instance of `BertForMultipleChoice` on Swag task.
-  - [`run_lm_finetuning.py`](./examples/run_lm_finetuning.py) - Show how to fine-tune an instance of `BertForPretraining' on a target text corpus.  
-   
-  These examples are detailed in the [Examples](#examples) section of this readme.
-
-- Three notebooks that were used to check that the TensorFlow and PyTorch models behave identically (in the [`notebooks` folder](./notebooks)):
-  - [`Comparing-TF-and-PT-models.ipynb`](./notebooks/Comparing-TF-and-PT-models.ipynb) - Compare the hidden states predicted by `BertModel`,
-  - [`Comparing-TF-and-PT-models-SQuAD.ipynb`](./notebooks/Comparing-TF-and-PT-models-SQuAD.ipynb) - Compare the spans predicted by  `BertForQuestionAnswering` instances,
-  - [`Comparing-TF-and-PT-models-MLM-NSP.ipynb`](./notebooks/Comparing-TF-and-PT-models-MLM-NSP.ipynb) - Compare the predictions of the `BertForPretraining` instances.
-
-  These notebooks are detailed in the [Notebooks](#notebooks) section of this readme.
-
-- A command-line interface to convert any TensorFlow checkpoint in a PyTorch dump:
-
-  This CLI is detailed in the [Command-line interface](#Command-line-interface) section of this readme.
-
-## Usage
-
-Here is a quick-start example using `BertTokenizer`, `BertModel` and `BertForMaskedLM` class with Google AI's pre-trained `Bert base uncased` model. See the [doc section](#doc) below for all the details on these classes.
-
-First let's prepare a tokenized input with `BertTokenizer`
+Let's do a very quick overview of PyTorch-Transformers. Detailled examples for each model architecture (Bert, GPT, GPT-2, Transformer-XL, XLNet and XLM) can be found in the [full documentation](https://huggingface.co/pytorch-transformers/).
 
 ```python
 import torch
-from pytorch_pretrained_bert import BertTokenizer, BertModel, BertForMaskedLM
+from pytorch_transformers import *
 
-# Load pre-trained model tokenizer (vocabulary)
+# PyTorch-Transformers has a unified API
+# for 6 transformer architectures and 27 pretrained weights.
+#          Model          | Tokenizer          | Pretrained weights shortcut
+MODELS = [(BertModel,       BertTokenizer,      'bert-base-uncased'),
+          (OpenAIGPTModel,  OpenAIGPTTokenizer, 'openai-gpt'),
+          (GPT2Model,       GPT2Tokenizer,      'gpt2'),
+          (TransfoXLModel,  TransfoXLTokenizer, 'transfo-xl-wt103'),
+          (XLNetModel,      XLNetTokenizer,     'xlnet-base-cased'),
+          (XLMModel,        XLMTokenizer,       'xlm-mlm-enfr-1024')]
+
+# Let's encode some text in a sequence of hidden-states using each model:
+for model_class, tokenizer_class, pretrained_weights in MODELS:
+    # Load pretrained model/tokenizer
+    tokenizer = tokenizer_class.from_pretrained(pretrained_weights)
+    model = model_class.from_pretrained(pretrained_weights)
+
+    # Encode text
+    input_ids = torch.tensor([tokenizer.encode("Here is some text to encode")])
+    last_hidden_states = model(input_ids)[0]  # Models outputs are now tuples
+
+# Each architecture is provided with several class for fine-tuning on down-stream tasks, e.g.
+BERT_MODEL_CLASSES = [BertModel, BertForPreTraining, BertForMaskedLM, BertForNextSentencePrediction,
+                      BertForSequenceClassification, BertForMultipleChoice, BertForTokenClassification,
+                      BertForQuestionAnswering]
+
+# All the classes for an architecture can be initiated from pretrained weights for this architecture
+# Note that additional weights added for fine-tuning are only initialized
+# and need to be trained on the down-stream task
 tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+for model_class in BERT_MODEL_CLASSES:
+    # Load pretrained model/tokenizer
+    model = model_class.from_pretrained('bert-base-uncased')
 
-# Tokenized input
-text = "Who was Jim Henson ? Jim Henson was a puppeteer"
-tokenized_text = tokenizer.tokenize(text)
+# Models can return full list of hidden-states & attentions weights at each layer
+model = model_class.from_pretrained(pretrained_weights,
+                                    output_hidden_states=True,
+                                    output_attentions=True)
+input_ids = torch.tensor([tokenizer.encode("Let's see all hidden-states and attentions on this text")])
+all_hidden_states, all_attentions = model(input_ids)[-2:]
 
-# Mask a token that we will try to predict back with `BertForMaskedLM`
-masked_index = 6
-tokenized_text[masked_index] = '[MASK]'
-assert tokenized_text == ['who', 'was', 'jim', 'henson', '?', 'jim', '[MASK]', 'was', 'a', 'puppet', '##eer']
+# Models are compatible with Torchscript
+model = model_class.from_pretrained(pretrained_weights, torchscript=True)
+traced_model = torch.jit.trace(model, (input_ids,))
 
-# Convert token to vocabulary indices
-indexed_tokens = tokenizer.convert_tokens_to_ids(tokenized_text)
-# Define sentence A and B indices associated to 1st and 2nd sentences (see paper)
-segments_ids = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
+# Simple serialization for models and tokenizers
+model.save_pretrained('./directory/to/save/')  # save
+model = model_class.from_pretrained('./directory/to/save/')  # re-load
+tokenizer.save_pretrained('./directory/to/save/')  # save
+tokenizer = tokenizer_class.from_pretrained(pretrained_weights)
 
-# Convert inputs to PyTorch tensors
-tokens_tensor = torch.tensor([indexed_tokens])
-segments_tensors = torch.tensor([segments_ids])
+# SOTA examples for GLUE, SQUAD, text generation...
 ```
 
-Let's see how to use `BertModel` to get hidden states
+## Quick tour of the fine-tuning/usage scripts
 
-```python
-# Load pre-trained model (weights)
-model = BertModel.from_pretrained('bert-base-uncased')
-model.eval()
+The library comprises several example scripts with SOTA performances for NLU and NLG tasks:
 
-# Predict hidden states features for each layer
-encoded_layers, _ = model(tokens_tensor, segments_tensors)
-# We have a hidden states for each of the 12 layers in model bert-base-uncased
-assert len(encoded_layers) == 12
-```
+- `run_glue.py`: an example fine-tuning Bert, XLNet and XLM on nine different GLUE tasks (*sequence-level classification*)
+- `run_squad.py`: an example fine-tuning Bert, XLNet and XLM on the question answering dataset SQuAD 2.0 (*token-level classification*)
+- `run_generation.py`: an example using GPT, GPT-2, Transformer-XL and XLNet for conditional language generation
+- other model-specific examples (see the documentation).
 
-And how to use `BertForMaskedLM`
+Here are three quick usage examples for these scripts:
 
-```python
-# Load pre-trained model (weights)
-model = BertForMaskedLM.from_pretrained('bert-base-uncased')
-model.eval()
+### `run_glue.py`: Fine-tuning on GLUE tasks for sequence classification
 
-# Predict all tokens
-predictions = model(tokens_tensor, segments_tensors)
+The [General Language Understanding Evaluation (GLUE) benchmark](https://gluebenchmark.com/) is a collection of nine sentence- or sentence-pair language understanding tasks for evaluating and analyzing natural language understanding systems.
 
-# confirm we were able to predict 'henson'
-predicted_index = torch.argmax(predictions[0, masked_index]).item()
-predicted_token = tokenizer.convert_ids_to_tokens([predicted_index])[0]
-assert predicted_token == 'henson'
-```
-
-## Doc
-
-Here is a detailed documentation of the classes in the package and how to use them:
-
-| Sub-section | Description |
-|-|-|
-| [Loading Google AI's pre-trained weigths](#Loading-Google-AIs-pre-trained-weigths-and-PyTorch-dump) | How to load Google AI's pre-trained weight or a PyTorch saved instance |
-| [PyTorch models](#PyTorch-models) | API of the eight PyTorch model classes: `BertModel`, `BertForMaskedLM`, `BertForNextSentencePrediction`, `BertForPreTraining`, `BertForSequenceClassification`, `BertForMultipleChoice` or `BertForQuestionAnswering` |
-| [Tokenizer: `BertTokenizer`](#Tokenizer-BertTokenizer) | API of the `BertTokenizer` class|
-| [Optimizer: `BertAdam`](#Optimizer-BertAdam) |  API of the `BertAdam` class |
-
-### Loading Google AI's pre-trained weigths and PyTorch dump
-
-To load one of Google AI's pre-trained models or a PyTorch saved model (an instance of `BertForPreTraining` saved with `torch.save()`), the PyTorch model classes and the tokenizer can be instantiated as
-
-```python
-model = BERT_CLASS.from_pretrained(PRE_TRAINED_MODEL_NAME_OR_PATH, cache_dir=None)
-```
-
-where
-
-- `BERT_CLASS` is either the `BertTokenizer` class (to load the vocabulary) or one of the eight PyTorch model classes (to load the pre-trained weights): `BertModel`, `BertForMaskedLM`, `BertForNextSentencePrediction`, `BertForPreTraining`, `BertForSequenceClassification`, `BertForTokenClassification`, `BertForMultipleChoice` or `BertForQuestionAnswering`, and
-- `PRE_TRAINED_MODEL_NAME_OR_PATH` is either:
-
-  - the shortcut name of a Google AI's pre-trained model selected in the list:
-
-    - `bert-base-uncased`: 12-layer, 768-hidden, 12-heads, 110M parameters
-    - `bert-large-uncased`: 24-layer, 1024-hidden, 16-heads, 340M parameters
-    - `bert-base-cased`: 12-layer, 768-hidden, 12-heads , 110M parameters
-    - `bert-large-cased`: 24-layer, 1024-hidden, 16-heads, 340M parameters
-    - `bert-base-multilingual-uncased`: (Orig, not recommended) 102 languages, 12-layer, 768-hidden, 12-heads, 110M parameters
-    - `bert-base-multilingual-cased`: **(New, recommended)** 104 languages, 12-layer, 768-hidden, 12-heads, 110M parameters
-    - `bert-base-chinese`: Chinese Simplified and Traditional, 12-layer, 768-hidden, 12-heads, 110M parameters
-
-  - a path or url to a pretrained model archive containing:
-
-    - `bert_config.json` a configuration file for the model, and
-    - `pytorch_model.bin` a PyTorch dump of a pre-trained instance `BertForPreTraining` (saved with the usual `torch.save()`)
-
-  If `PRE_TRAINED_MODEL_NAME_OR_PATH` is a shortcut name, the pre-trained weights will be downloaded from AWS S3 (see the links [here](pytorch_pretrained_bert/modeling.py)) and stored in a cache folder to avoid future download (the cache folder can be found at `~/.pytorch_pretrained_bert/`).
-- `cache_dir` can be an optional path to a specific directory to download and cache the pre-trained model weights. This option is useful in particular when you are using distributed training: to avoid concurrent access to the same weights you can set for example `cache_dir='./pretrained_model_{}'.format(args.local_rank)` (see the section on distributed training for more information).
-
-`Uncased` means that the text has been lowercased before WordPiece tokenization, e.g., `John Smith` becomes `john smith`. The Uncased model also strips out any accent markers. `Cased` means that the true case and accent markers are preserved. Typically, the Uncased model is better unless you know that case information is important for your task (e.g., Named Entity Recognition or Part-of-Speech tagging). For information about the Multilingual and Chinese model, see the [Multilingual README](https://github.com/google-research/bert/blob/master/multilingual.md) or the original TensorFlow repository.
-
-**When using an `uncased model`, make sure to pass `--do_lower_case` to the example training scripts (or pass `do_lower_case=True` to FullTokenizer if you're using your own script and loading the tokenizer your-self.).**
-
-Example:
-```python
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
-model = BertForSequenceClassification.from_pretrained('bert-base-uncased')
-```
-
-### PyTorch models
-
-#### 1. `BertModel`
-
-`BertModel` is the basic BERT Transformer model with a layer of summed token, position and sequence embeddings followed by a series of identical self-attention blocks (12 for BERT-base, 24 for BERT-large).
-
-The inputs and output are **identical to the TensorFlow model inputs and outputs**.
-
-We detail them here. This model takes as *inputs*:
-[`modeling.py`](./pytorch_pretrained_bert/modeling.py)
-- `input_ids`: a torch.LongTensor of shape [batch_size, sequence_length] with the word token indices in the vocabulary (see the tokens preprocessing logic in the scripts [`extract_features.py`](./examples/extract_features.py), [`run_classifier.py`](./examples/run_classifier.py) and [`run_squad.py`](./examples/run_squad.py)), and
-- `token_type_ids`: an optional torch.LongTensor of shape [batch_size, sequence_length] with the token types indices selected in [0, 1]. Type 0 corresponds to a `sentence A` and type 1 corresponds to a `sentence B` token (see BERT paper for more details).
-- `attention_mask`: an optional torch.LongTensor of shape [batch_size, sequence_length] with indices selected in [0, 1]. It's a mask to be used if some input sequence lengths are smaller than the max input sequence length of the current batch. It's the mask that we typically use for attention when a batch has varying length sentences.
-- `output_all_encoded_layers`: boolean which controls the content of the `encoded_layers` output as described below. Default: `True`.
-
-This model *outputs* a tuple composed of:
-
-- `encoded_layers`: controled by the value of the `output_encoded_layers` argument:
-
-  - `output_all_encoded_layers=True`: outputs a list of the encoded-hidden-states at the end of each attention block (i.e. 12 full sequences for BERT-base, 24 for BERT-large), each encoded-hidden-state is a torch.FloatTensor of size [batch_size, sequence_length, hidden_size],
-  - `output_all_encoded_layers=False`: outputs only the encoded-hidden-states corresponding to the last attention block, i.e. a single torch.FloatTensor of size [batch_size, sequence_length, hidden_size],
-
-- `pooled_output`: a torch.FloatTensor of size [batch_size, hidden_size] which is the output of a classifier pretrained on top of the hidden state associated to the first character of the input (`CLF`) to train on the Next-Sentence task (see BERT's paper).
-
-An example on how to use this class is given in the [`extract_features.py`](./examples/extract_features.py) script which can be used to extract the hidden states of the model for a given input.
-
-#### 2. `BertForPreTraining`
-
-`BertForPreTraining` includes the `BertModel` Transformer followed by the two pre-training heads:
-
-- the masked language modeling head, and
-- the next sentence classification head.
-
-*Inputs* comprises the inputs of the [`BertModel`](#-1.-`BertModel`) class plus two optional labels:
-
-- `masked_lm_labels`: masked language modeling labels: torch.LongTensor of shape [batch_size, sequence_length] with indices selected in [-1, 0, ..., vocab_size]. All labels set to -1 are ignored (masked), the loss is only computed for the labels set in [0, ..., vocab_size]
-- `next_sentence_label`: next sentence classification loss: torch.LongTensor of shape [batch_size] with indices selected in [0, 1]. 0 => next sentence is the continuation, 1 => next sentence is a random sentence.
-
-*Outputs*:
-
-- if `masked_lm_labels` and `next_sentence_label` are not `None`: Outputs the total_loss which is the sum of the masked language modeling loss and the next sentence classification loss.
-- if `masked_lm_labels` or `next_sentence_label` is `None`: Outputs a tuple comprising
-
-  - the masked language modeling logits, and
-  - the next sentence classification logits.
-  
-An example on how to use this class is given in the [`run_lm_finetuning.py`](./examples/run_lm_finetuning.py) script which can be used to fine-tune the BERT language model on your specific different text corpus. This should improve model performance, if the language style is different from the original BERT training corpus (Wiki + BookCorpus).
-
-
-#### 3. `BertForMaskedLM`
-
-`BertForMaskedLM` includes the `BertModel` Transformer followed by the (possibly) pre-trained  masked language modeling head.
-
-*Inputs* comprises the inputs of the [`BertModel`](#-1.-`BertModel`) class plus optional label:
-
-- `masked_lm_labels`: masked language modeling labels: torch.LongTensor of shape [batch_size, sequence_length] with indices selected in [-1, 0, ..., vocab_size]. All labels set to -1 are ignored (masked), the loss is only computed for the labels set in [0, ..., vocab_size]
-
-*Outputs*:
-
-- if `masked_lm_labels` is not `None`: Outputs the masked language modeling loss.
-- if `masked_lm_labels` is `None`: Outputs the masked language modeling logits.
-
-#### 4. `BertForNextSentencePrediction`
-
-`BertForNextSentencePrediction` includes the `BertModel` Transformer followed by the next sentence classification head.
-
-*Inputs* comprises the inputs of the [`BertModel`](#-1.-`BertModel`) class plus an optional label:
-
-- `next_sentence_label`: next sentence classification loss: torch.LongTensor of shape [batch_size] with indices selected in [0, 1]. 0 => next sentence is the continuation, 1 => next sentence is a random sentence.
-
-*Outputs*:
-
-- if `next_sentence_label` is not `None`: Outputs the next sentence classification loss.
-- if `next_sentence_label` is `None`: Outputs the next sentence classification logits.
-
-#### 5. `BertForSequenceClassification`
-
-`BertForSequenceClassification` is a fine-tuning model that includes `BertModel` and a sequence-level (sequence or pair of sequences) classifier on top of the `BertModel`.
-
-The sequence-level classifier is a linear layer that takes as input the last hidden state of the first character in the input sequence (see Figures 3a and 3b in the BERT paper).
-
-An example on how to use this class is given in the [`run_classifier.py`](./examples/run_classifier.py) script which can be used to fine-tune a single sequence (or pair of sequence) classifier using BERT, for example for the MRPC task.
-
-#### 6. `BertForMultipleChoice`
-
-`BertForMultipleChoice` is a fine-tuning model that includes `BertModel` and a linear layer on top of the `BertModel`.
-
-The linear layer outputs a single value for each choice of a multiple choice problem, then all the outputs corresponding to an instance are passed through a softmax to get the model choice.
-
-This implementation is largely inspired by the work of OpenAI in [Improving Language Understanding by Generative Pre-Training](https://blog.openai.com/language-unsupervised/) and the answer of Jacob Devlin in the following [issue](https://github.com/google-research/bert/issues/38).
-
-An example on how to use this class is given in the [`run_swag.py`](./examples/run_swag.py) script which can be used to fine-tune a multiple choice classifier using BERT, for example for the Swag task.
-
-#### 7. `BertForTokenClassification`
-
-`BertForTokenClassification` is a fine-tuning model that includes `BertModel` and a token-level classifier on top of the `BertModel`.
-
-The token-level classifier is a linear layer that takes as input the last hidden state of the sequence.
-
-#### 8. `BertForQuestionAnswering`
-
-`BertForQuestionAnswering` is a fine-tuning model that includes `BertModel` with a token-level classifiers on top of the full sequence of last hidden states.
-
-The token-level classifier takes as input the full sequence of the last hidden state and compute several (e.g. two) scores for each tokens that can for example respectively be the score that a given token is a `start_span` and a `end_span` token (see Figures 3c and 3d in the BERT paper).
-
-An example on how to use this class is given in the [`run_squad.py`](./examples/run_squad.py) script which can be used to fine-tune a token classifier using BERT, for example for the SQuAD task.
-
-### Tokenizer: `BertTokenizer`
-
-`BertTokenizer` perform end-to-end tokenization, i.e. basic tokenization followed by WordPiece tokenization.
-
-This class has two arguments:
-
-- `vocab_file`: path to a vocabulary file.
-- `do_lower_case`: convert text to lower-case while tokenizing. **Default = True**.
-
-and three methods:
-
-- `tokenize(text)`: convert a `str` in a list of `str` tokens by (1) performing basic tokenization and (2) WordPiece tokenization.
-- `convert_tokens_to_ids(tokens)`: convert a list of `str` tokens in a list of `int` indices in the vocabulary.
-- `convert_ids_to_tokens(tokens)`: convert a list of `int` indices in a list of `str` tokens in the vocabulary.
-
-Please refer to the doc strings and code in [`tokenization.py`](./pytorch_pretrained_bert/tokenization.py) for the details of the `BasicTokenizer` and `WordpieceTokenizer` classes. In general it is recommended to use `BertTokenizer` unless you know what you are doing.
-
-### Optimizer: `BertAdam`
-
-`BertAdam` is a `torch.optimizer` adapted to be closer to the optimizer used in the TensorFlow implementation of Bert. The differences with PyTorch Adam optimizer are the following:
-
-- BertAdam implements weight decay fix,
-- BertAdam doesn't compensate for bias as in the regular Adam optimizer.
-
-The optimizer accepts the following arguments:
-
-- `lr` : learning rate
-- `warmup` : portion of `t_total` for the warmup, `-1`  means no warmup. Default : `-1`
-- `t_total` : total number of training steps for the learning
-    rate schedule, `-1`  means constant learning rate. Default : `-1`
-- `schedule` : schedule to use for the warmup (see above). Default : `'warmup_linear'`
-- `b1` : Adams b1. Default : `0.9`
-- `b2` : Adams b2. Default : `0.999`
-- `e` : Adams epsilon. Default : `1e-6`
-- `weight_decay:` Weight decay. Default : `0.01`
-- `max_grad_norm` : Maximum norm for the gradients (`-1` means no clipping). Default : `1.0`
-
-## Examples
-
-| Sub-section | Description |
-|-|-|
-| [Training large models: introduction, tools and examples](#Training-large-models-introduction,-tools-and-examples) | How to use gradient-accumulation, multi-gpu training, distributed training, optimize on CPU and 16-bits training to train Bert models |
-| [Fine-tuning with BERT: running the examples](#Fine-tuning-with-BERT-running-the-examples) | Running the examples in [`./examples`](./examples/): `extract_classif.py`, `run_classifier.py`, `run_squad.py` and `run_lm_finetuning.py` |
-| [Fine-tuning BERT-large on GPUs](#Fine-tuning-BERT-large-on-GPUs) | How to fine tune `BERT large`|
-
-### Training large models: introduction, tools and examples
-
-BERT-base and BERT-large are respectively 110M and 340M parameters models and it can be difficult to fine-tune them on a single GPU with the recommended batch size for good performance (in most case a batch size of 32).
-
-To help with fine-tuning these models, we have included several techniques that you can activate in the fine-tuning scripts [`run_classifier.py`](./examples/run_classifier.py) and [`run_squad.py`](./examples/run_squad.py): gradient-accumulation, multi-gpu training, distributed training and 16-bits training . For more details on how to use these techniques you can read [the tips on training large batches in PyTorch](https://medium.com/huggingface/training-larger-batches-practical-tips-on-1-gpu-multi-gpu-distributed-setups-ec88c3e51255) that I published earlier this month.
-
-Here is how to use these techniques in our scripts:
-
-- **Gradient Accumulation**: Gradient accumulation can be used by supplying a integer greater than 1 to the `--gradient_accumulation_steps` argument. The batch at each step will be divided by this integer and gradient will be accumulated over `gradient_accumulation_steps` steps.
-- **Multi-GPU**: Multi-GPU is automatically activated when several GPUs are detected and the batches are splitted over the GPUs.
-- **Distributed training**: Distributed training can be activated by supplying an integer greater or equal to 0 to the `--local_rank` argument (see below).
-- **16-bits training**: 16-bits training, also called mixed-precision training, can reduce the memory requirement of your model on the GPU by using half-precision training, basically allowing to double the batch size. If you have a recent GPU (starting from NVIDIA Volta architecture) you should see no decrease in speed. A good introduction to Mixed precision training can be found [here](https://devblogs.nvidia.com/mixed-precision-training-deep-neural-networks/) and a full documentation is [here](https://docs.nvidia.com/deeplearning/sdk/mixed-precision-training/index.html). In our scripts, this option can be activated by setting the `--fp16` flag and you can play with loss scaling using the `--loss_scale` flag (see the previously linked documentation for details on loss scaling). The loss scale can be zero in which case the scale is dynamically adjusted or a positive power of two in which case the scaling is static.
-
-To use 16-bits training and distributed training, you need to install NVIDIA's apex extension [as detailed here](https://github.com/nvidia/apex). You will find more information regarding the internals of `apex` and how to use `apex` in [the doc and the associated repository](https://github.com/nvidia/apex). The results of the tests performed on pytorch-BERT by the NVIDIA team (and my trials at reproducing them) can be consulted in [the relevant PR of the present repository](https://github.com/huggingface/pytorch-pretrained-BERT/pull/116).
-
-Note: To use *Distributed Training*, you will need to run one training script on each of your machines. This can be done for example by running the following command on each server (see [the above mentioned blog post]((https://medium.com/huggingface/training-larger-batches-practical-tips-on-1-gpu-multi-gpu-distributed-setups-ec88c3e51255)) for more details):
-```bash
-python -m torch.distributed.launch --nproc_per_node=4 --nnodes=2 --node_rank=$THIS_MACHINE_INDEX --master_addr="192.168.1.1" --master_port=1234 run_classifier.py (--arg1 --arg2 --arg3 and all other arguments of the run_classifier script)
-```
-Where `$THIS_MACHINE_INDEX` is an sequential index assigned to each of your machine (0, 1, 2...) and the machine with rank 0 has an IP address `192.168.1.1` and an open port `1234`.
-
-### Fine-tuning with BERT: running the examples
-
-We showcase several fine-tuning examples based on (and extended from) [the original implementation](https://github.com/google-research/bert/):
-
-- a *sequence-level classifier* on the MRPC classification corpus,
-- a *token-level classifier* on the question answering dataset SQuAD, and
-- a *sequence-level multiple-choice classifier* on the SWAG classification corpus.
-- a *BERT language model* on another target corpus
- 
-#### MRPC
-
-This example code fine-tunes BERT on the Microsoft Research Paraphrase
-Corpus (MRPC) corpus and runs in less than 10 minutes on a single K-80 and in 27 seconds (!) on single tesla V100 16GB with apex installed.
-
-Before running this example you should download the
+Before running anyone of these GLUE tasks you should download the
 [GLUE data](https://gluebenchmark.com/tasks) by running
 [this script](https://gist.github.com/W4ngatang/60c2bdb54d156a41194446737ce03e2e)
 and unpack it to some directory `$GLUE_DIR`.
 
+You should also install the additional packages required by the examples:
+
+```shell
+pip install -r ./examples/requirements.txt
+```
+
+```shell
+export GLUE_DIR=/path/to/glue
+export TASK_NAME=MRPC
+
+python ./examples/run_glue.py \
+    --model_type bert \
+    --model_name_or_path bert-base-uncased \
+    --task_name $TASK_NAME \
+    --do_train \
+    --do_eval \
+    --do_lower_case \
+    --data_dir $GLUE_DIR/$TASK_NAME \
+    --max_seq_length 128 \
+    --per_gpu_eval_batch_size=8   \
+    --per_gpu_train_batch_size=8   \
+    --learning_rate 2e-5 \
+    --num_train_epochs 3.0 \
+    --output_dir /tmp/$TASK_NAME/
+```
+
+where task name can be one of CoLA, SST-2, MRPC, STS-B, QQP, MNLI, QNLI, RTE, WNLI.
+
+The dev set results will be present within the text file 'eval_results.txt' in the specified output_dir. In case of MNLI, since there are two separate dev sets, matched and mismatched, there will be a separate output folder called '/tmp/MNLI-MM/' in addition to '/tmp/MNLI/'.
+
+#### Fine-tuning XLNet model on the STS-B regression task
+
+This example code fine-tunes XLNet on the STS-B corpus using parallel training on a server with 4 V100 GPUs.
+Parallel training is a simple way to use several GPUs (but is slower and less flexible than distributed training, see below).
+
 ```shell
 export GLUE_DIR=/path/to/glue
 
-python run_classifier.py \
-  --task_name MRPC \
-  --do_train \
-  --do_eval \
-  --do_lower_case \
-  --data_dir $GLUE_DIR/MRPC/ \
-  --bert_model bert-base-uncased \
-  --max_seq_length 128 \
-  --train_batch_size 32 \
-  --learning_rate 2e-5 \
-  --num_train_epochs 3.0 \
-  --output_dir /tmp/mrpc_output/
+python ./examples/run_glue.py \
+    --model_type xlnet \
+    --model_name_or_path xlnet-large-cased \
+    --do_train  \
+    --do_eval   \
+    --task_name=sts-b     \
+    --data_dir=${GLUE_DIR}/STS-B  \
+    --output_dir=./proc_data/sts-b-110   \
+    --max_seq_length=128   \
+    --per_gpu_eval_batch_size=8   \
+    --per_gpu_train_batch_size=8   \
+    --gradient_accumulation_steps=1 \
+    --max_steps=1200  \
+    --model_name=xlnet-large-cased   \
+    --overwrite_output_dir   \
+    --overwrite_cache \
+    --warmup_steps=120
 ```
 
-Our test ran on a few seeds with [the original implementation hyper-parameters](https://github.com/google-research/bert#sentence-and-sentence-pair-classification-tasks) gave evaluation results between 84% and 88%.
+On this machine we thus have a batch size of 32, please increase `gradient_accumulation_steps` to reach the same batch size if you have a smaller machine. These hyper-parameters should results in a Pearson correlation coefficient of `+0.917` on the development set.
 
-**Fast run with apex and 16 bit precision: fine-tuning on MRPC in 27 seconds!**
-First install apex as indicated [here](https://github.com/NVIDIA/apex).
-Then run
-```shell
-export GLUE_DIR=/path/to/glue
+#### Fine-tuning Bert model on the MRPC classification task
 
-python run_classifier.py \
-  --task_name MRPC \
-  --do_train \
-  --do_eval \
-  --do_lower_case \
-  --data_dir $GLUE_DIR/MRPC/ \
-  --bert_model bert-base-uncased \
-  --max_seq_length 128 \
-  --train_batch_size 32 \
-  --learning_rate 2e-5 \
-  --num_train_epochs 3.0 \
-  --output_dir /tmp/mrpc_output/
-```
+This example code fine-tunes the Bert Whole Word Masking model on the Microsoft Research Paraphrase Corpus (MRPC) corpus using distributed training on 8 V100 GPUs to reach a F1 > 92.
 
-#### SQuAD
-
-This example code fine-tunes BERT on the SQuAD dataset. It runs in 24 min (with BERT-base) or 68 min (with BERT-large) on a single tesla V100 16GB.
-
-The data for SQuAD can be downloaded with the following links and should be saved in a `$SQUAD_DIR` directory.
-
-*   [train-v1.1.json](https://rajpurkar.github.io/SQuAD-explorer/dataset/train-v1.1.json)
-*   [dev-v1.1.json](https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v1.1.json)
-*   [evaluate-v1.1.py](https://github.com/allenai/bi-att-flow/blob/master/squad/evaluate-v1.1.py)
-
-```shell
-export SQUAD_DIR=/path/to/SQUAD
-
-python run_squad.py \
-  --bert_model bert-base-uncased \
-  --do_train \
-  --do_predict \
-  --do_lower_case \
-  --train_file $SQUAD_DIR/train-v1.1.json \
-  --predict_file $SQUAD_DIR/dev-v1.1.json \
-  --train_batch_size 12 \
-  --learning_rate 3e-5 \
-  --num_train_epochs 2.0 \
-  --max_seq_length 384 \
-  --doc_stride 128 \
-  --output_dir /tmp/debug_squad/
-```
-
-Training with the previous hyper-parameters gave us the following results:
 ```bash
-{"f1": 88.52381567990474, "exact_match": 81.22043519394512}
+python -m torch.distributed.launch --nproc_per_node 8 ./examples/run_glue.py   \
+    --model_type bert \
+    --model_name_or_path bert-large-uncased-whole-word-masking \
+    --task_name MRPC \
+    --do_train   \
+    --do_eval   \
+    --do_lower_case   \
+    --data_dir $GLUE_DIR/MRPC/   \
+    --max_seq_length 128   \
+    --per_gpu_eval_batch_size=8   \
+    --per_gpu_train_batch_size=8   \
+    --learning_rate 2e-5   \
+    --num_train_epochs 3.0  \
+    --output_dir /tmp/mrpc_output/ \
+    --overwrite_output_dir   \
+    --overwrite_cache \
 ```
 
-#### SWAG
+Training with these hyper-parameters gave us the following results:
 
-The data for SWAG can be downloaded by cloning the following [repository](https://github.com/rowanz/swagaf)
-
-```shell
-export SWAG_DIR=/path/to/SWAG
-
-python run_swag.py \
-  --bert_model bert-base-uncased \
-  --do_train \
-  --do_lower_case \
-  --do_eval \
-  --data_dir $SWAG_DIR/data \
-  --train_batch_size 16 \
-  --learning_rate 2e-5 \
-  --num_train_epochs 3.0 \
-  --max_seq_length 80 \
-  --output_dir /tmp/swag_output/ \
-  --gradient_accumulation_steps 4
+```bash
+  acc = 0.8823529411764706
+  acc_and_f1 = 0.901702786377709
+  eval_loss = 0.3418912578906332
+  f1 = 0.9210526315789473
+  global_step = 174
+  loss = 0.07231863956341798
 ```
 
-Training with the previous hyper-parameters on a single GPU gave us the following results:
+### `run_squad.py`: Fine-tuning on SQuAD for question-answering
+
+This example code fine-tunes BERT on the SQuAD dataset using distributed training on 8 V100 GPUs and Bert Whole Word Masking uncased model to reach a F1 > 93 on SQuAD:
+
+```bash
+python -m torch.distributed.launch --nproc_per_node=8 ./examples/run_squad.py \
+    --model_type bert \
+    --model_name_or_path bert-large-uncased-whole-word-masking \
+    --do_train \
+    --do_eval \
+    --do_lower_case \
+    --train_file $SQUAD_DIR/train-v1.1.json \
+    --predict_file $SQUAD_DIR/dev-v1.1.json \
+    --learning_rate 3e-5 \
+    --num_train_epochs 2 \
+    --max_seq_length 384 \
+    --doc_stride 128 \
+    --output_dir ../models/wwm_uncased_finetuned_squad/ \
+    --per_gpu_eval_batch_size=3   \
+    --per_gpu_train_batch_size=3   \
 ```
-eval_accuracy = 0.8062081375587323
-eval_loss = 0.5966546792367169
-global_step = 13788
-loss = 0.06423990014260186
+
+Training with these hyper-parameters gave us the following results:
+
+```bash
+python $SQUAD_DIR/evaluate-v1.1.py $SQUAD_DIR/dev-v1.1.json ../models/wwm_uncased_finetuned_squad/predictions.json
+{"exact_match": 86.91579943235573, "f1": 93.1532499015869}
 ```
 
-#### LM Fine-tuning
+This is the model provided as `bert-large-uncased-whole-word-masking-finetuned-squad`.
 
-The data should be a text file in the same format as [sample_text.txt](./samples/sample_text.txt)  (one sentence per line, docs separated by empty line).
-You can download an [exemplary training corpus](https://ext-bert-sample.obs.eu-de.otc.t-systems.com/small_wiki_sentence_corpus.txt) generated from wikipedia articles and splitted into ~500k sentences with spaCy. 
-Training one epoch on this corpus takes about 1:20h on 4 x NVIDIA Tesla P100 with `train_batch_size=200` and `max_seq_length=128`:
+### `run_generation.py`: Text generation with GPT, GPT-2, Transformer-XL and XLNet
 
+A conditional generation script is also included to generate text from a prompt.
+The generation script include the [tricks](https://github.com/rusiaaman/XLNet-gen#methodology) proposed by by Aman Rusia to get high quality generation with memory models like Transformer-XL and XLNet (include a predefined text to make short inputs longer).
+
+Here is how to run the script with the small version of OpenAI GPT-2 model:
 
 ```shell
-python run_lm_finetuning.py \
-  --bert_model bert-base-cased \
-  --do_train \
-  --train_file samples/sample_text.txt \
-  --output_dir models \
-  --num_train_epochs 5.0 \
-  --learning_rate 3e-5 \
-  --train_batch_size 32 \
-  --max_seq_length 128 
+python ./examples/run_generation.py \
+    --model_type=gpt2 \
+    --length=20 \
+    --model_name_or_path=gpt2 \
 ```
 
-## Fine-tuning BERT-large on GPUs
+## Migrating from pytorch-pretrained-bert to pytorch-transformers
 
-The options we list above allow to fine-tune BERT-large rather easily on GPU(s) instead of the TPU used by the original implementation.
+Here is a quick summary of what you should take care of when migrating from `pytorch-pretrained-bert` to `pytorch-transformers`
 
-For example, fine-tuning BERT-large on SQuAD can be done on a server with 4 k-80 (these are pretty old now) in 18 hours. Our results are similar to the TensorFlow implementation results (actually slightly higher):
-```bash
-{"exact_match": 84.56953642384106, "f1": 91.04028647786927}
-```
-To get these results we used a combination of:
-- multi-GPU training (automatically activated on a multi-GPU server),
-- 2 steps of gradient accumulation and
-- perform the optimization step on CPU to store Adam's averages in RAM.
+### Models always output `tuples`
 
-Here is the full list of hyper-parameters for this run:
-```bash
-python ./run_squad.py \
-  --bert_model bert-large-uncased \
-  --do_train \
-  --do_predict \
-  --do_lower_case \
-  --train_file $SQUAD_TRAIN \
-  --predict_file $SQUAD_EVAL \
-  --learning_rate 3e-5 \
-  --num_train_epochs 2 \
-  --max_seq_length 384 \
-  --doc_stride 128 \
-  --output_dir $OUTPUT_DIR \
-  --train_batch_size 24 \
-  --gradient_accumulation_steps 2 
-```
+The main breaking change when migrating from `pytorch-pretrained-bert` to `pytorch-transformers` is that the models forward method always outputs a `tuple` with various elements depending on the model and the configuration parameters.
 
-If you have a recent GPU (starting from NVIDIA Volta series), you should try **16-bit fine-tuning** (FP16).
+The exact content of the tuples for each model are detailled in the models' docstrings and the [documentation](https://huggingface.co/pytorch-transformers/).
 
-Here is an example of hyper-parameters for a FP16 run we tried:
-```bash
-python ./run_squad.py \
-  --bert_model bert-large-uncased \
-  --do_train \
-  --do_predict \
-  --do_lower_case \
-  --train_file $SQUAD_TRAIN \
-  --predict_file $SQUAD_EVAL \
-  --learning_rate 3e-5 \
-  --num_train_epochs 2 \
-  --max_seq_length 384 \
-  --doc_stride 128 \
-  --output_dir $OUTPUT_DIR \
-  --train_batch_size 24 \
-  --fp16 \
-  --loss_scale 128
+In pretty much every case, you will be fine by taking the first element of the output as the output you previously used in `pytorch-pretrained-bert`.
+
+Here is a `pytorch-pretrained-bert` to `pytorch-transformers` conversion example for a `BertForSequenceClassification` classification model:
+
+```python
+# Let's load our model
+model = BertForSequenceClassification.from_pretrained('bert-base-uncased')
+
+# If you used to have this line in pytorch-pretrained-bert:
+loss = model(input_ids, labels=labels)
+
+# Now just use this line in pytorch-transformers to extract the loss from the output tuple:
+outputs = model(input_ids, labels=labels)
+loss = outputs[0]
+
+# In pytorch-transformers you can also have access to the logits:
+loss, logits = outputs[:2]
+
+# And even the attention weigths if you configure the model to output them (and other outputs too, see the docstrings and documentation)
+model = BertForSequenceClassification.from_pretrained('bert-base-uncased', output_attentions=True)
+outputs = model(input_ids, labels=labels)
+loss, logits, attentions = outputs
 ```
 
-The results were similar to the above FP32 results (actually slightly higher):
-```bash
-{"exact_match": 84.65468306527909, "f1": 91.238669287002}
+### Serialization
+
+Breaking change: Models are now set in evaluation mode by default when instantiated with the `from_pretrained()` method.
+To train them don't forget to set them back in training mode (`model.train()`) to activate the dropout modules.
+
+Also, while not a breaking change, the serialization methods have been standardized and you probably should switch to the new method `save_pretrained(save_directory)` if you were using any other serialization method before.
+
+Here is an example:
+
+```python
+### Let's load a model and tokenizer
+model = BertForSequenceClassification.from_pretrained('bert-base-uncased')
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+### Do some stuff to our model and tokenizer
+# Ex: add new tokens to the vocabulary and embeddings of our model
+tokenizer.add_tokens(['[SPECIAL_TOKEN_1]', '[SPECIAL_TOKEN_2]'])
+model.resize_token_embeddings(len(tokenizer))
+# Train our model
+train(model)
+
+### Now let's save our model and tokenizer to a directory
+model.save_pretrained('./my_saved_model_directory/')
+tokenizer.save_pretrained('./my_saved_model_directory/')
+
+### Reload the model and the tokenizer
+model = BertForSequenceClassification.from_pretrained('./my_saved_model_directory/')
+tokenizer = BertTokenizer.from_pretrained('./my_saved_model_directory/')
 ```
 
-## Notebooks
+### Optimizers: BertAdam & OpenAIAdam are now AdamW, schedules are standard PyTorch schedules
 
-We include [three Jupyter Notebooks](https://github.com/huggingface/pytorch-pretrained-BERT/tree/master/notebooks) that can be used to check that the predictions of the PyTorch model are identical to the predictions of the original TensorFlow model.
+The two optimizers previously included, `BertAdam` and `OpenAIAdam`, have been replaced by a single `AdamW` optimizer.
+The new optimizer `AdamW` matches PyTorch `Adam` optimizer API.
 
-- The first NoteBook ([Comparing-TF-and-PT-models.ipynb](./notebooks/Comparing-TF-and-PT-models.ipynb)) extracts the hidden states of a full sequence on each layers of the TensorFlow and the PyTorch models and computes the standard deviation between them. In the given example, we get a standard deviation of 1.5e-7 to 9e-7 on the various hidden state of the models.
+The schedules are now standard [PyTorch learning rate schedulers](https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate) and not part of the optimizer anymore.
 
-- The second NoteBook ([Comparing-TF-and-PT-models-SQuAD.ipynb](./notebooks/Comparing-TF-and-PT-models-SQuAD.ipynb)) compares the loss computed by the TensorFlow and the PyTorch models for identical initialization of the fine-tuning layer of the `BertForQuestionAnswering` and computes the standard deviation between them. In the given example, we get a standard deviation of 2.5e-7 between the models.
+Here is a conversion examples from `BertAdam` with a linear warmup and decay schedule to `AdamW` and the same schedule:
 
-- The third NoteBook ([Comparing-TF-and-PT-models-MLM-NSP.ipynb](./notebooks/Comparing-TF-and-PT-models-MLM-NSP.ipynb)) compares the predictions computed by the TensorFlow and the PyTorch models for masked token language modeling using the pre-trained masked language modeling model.
+```python
+# Parameters:
+lr = 1e-3
+num_total_steps = 1000
+num_warmup_steps = 100
+warmup_proportion = float(num_warmup_steps) / float(num_total_steps)  # 0.1
 
-Please follow the instructions given in the notebooks to run and modify them.
+### Previously BertAdam optimizer was instantiated like this:
+optimizer = BertAdam(model.parameters(), lr=lr, schedule='warmup_linear', warmup=warmup_proportion, t_total=num_total_steps)
+### and used like this:
+for batch in train_data:
+    loss = model(batch)
+    loss.backward()
+    optimizer.step()
 
-## Command-line interface
-
-A command-line interface is provided to convert a TensorFlow checkpoint in a PyTorch dump of the `BertForPreTraining` class  (see above).
-
-You can convert any TensorFlow checkpoint for BERT (in particular [the pre-trained models released by Google](https://github.com/google-research/bert#pre-trained-models)) in a PyTorch save file by using the [`./pytorch_pretrained_bert/convert_tf_checkpoint_to_pytorch.py`](convert_tf_checkpoint_to_pytorch.py) script.
-
-This CLI takes as input a TensorFlow checkpoint (three files starting with `bert_model.ckpt`) and the associated configuration file (`bert_config.json`), and creates a PyTorch model for this configuration, loads the weights from the TensorFlow checkpoint in the PyTorch model and saves the resulting model in a standard PyTorch save file that can be imported using `torch.load()` (see examples in [`extract_features.py`](./examples/extract_features.py), [`run_classifier.py`](./examples/run_classifier.py) and [`run_squad.py`]((./examples/run_squad.py))).
-
-You only need to run this conversion script **once** to get a PyTorch model. You can then disregard the TensorFlow checkpoint (the three files starting with `bert_model.ckpt`) but be sure to keep the configuration file (`bert_config.json`) and the vocabulary file (`vocab.txt`) as these are needed for the PyTorch model too.
-
-To run this specific conversion script you will need to have TensorFlow and PyTorch installed (`pip install tensorflow`). The rest of the repository only requires PyTorch.
-
-Here is an example of the conversion process for a pre-trained `BERT-Base Uncased` model:
-
-```shell
-export BERT_BASE_DIR=/path/to/bert/uncased_L-12_H-768_A-12
-
-pytorch_pretrained_bert convert_tf_checkpoint_to_pytorch \
-  $BERT_BASE_DIR/bert_model.ckpt \
-  $BERT_BASE_DIR/bert_config.json \
-  $BERT_BASE_DIR/pytorch_model.bin
+### In PyTorch-Transformers, optimizer and schedules are splitted and instantiated like this:
+optimizer = AdamW(model.parameters(), lr=lr, correct_bias=False)  # To reproduce BertAdam specific behavior set correct_bias=False
+scheduler = WarmupLinearSchedule(optimizer, warmup_steps=num_warmup_steps, t_total=num_total_steps)  # PyTorch scheduler
+### and used like this:
+for batch in train_data:
+    loss = model(batch)
+    loss.backward()
+    scheduler.step()
+    optimizer.step()
 ```
 
-You can download Google's pre-trained models for the conversion [here](https://github.com/google-research/bert#pre-trained-models).
+## Citation
 
-## TPU
-
-TPU support and pretraining scripts
-
-TPU are not supported by the current stable release of PyTorch (0.4.1). However, the next version of PyTorch (v1.0) should support training on TPU and is expected to be released soon (see the recent [official announcement](https://cloud.google.com/blog/products/ai-machine-learning/introducing-pytorch-across-google-cloud)).
-
-We will add TPU support when this next release is published.
-
-The original TensorFlow code further comprises two scripts for pre-training BERT: [create_pretraining_data.py](https://github.com/google-research/bert/blob/master/create_pretraining_data.py) and [run_pretraining.py](https://github.com/google-research/bert/blob/master/run_pretraining.py).
-
-Since, pre-training BERT is a particularly expensive operation that basically requires one or several TPUs to be completed in a reasonable amout of time (see details [here](https://github.com/google-research/bert#pre-training-with-bert)) we have decided to wait for the inclusion of TPU support in PyTorch to convert these pre-training scripts.
+At the moment, there is no paper associated to PyTorch-Transformers but we are working on preparing one. In the meantime, please include a mention of the library and a link to the present repository if you use this work in a published or open-source project.

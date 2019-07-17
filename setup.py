@@ -25,7 +25,7 @@ To create the package for pypi.
    (pypi suggest using twine as other methods upload files via plaintext.)
 
    Check that you can install it in a virtualenv by running:
-   pip install -i https://testpypi.python.org/pypi allennlp
+   pip install -i https://testpypi.python.org/pypi pytorch-transformers
 
 6. Upload the final version to actual pypi:
    twine upload dist/* -r pypi
@@ -33,32 +33,35 @@ To create the package for pypi.
 7. Copy the release notes from RELEASE.md to the tag in github once everything is looking hunky-dory.
 
 """
+from io import open
 from setuptools import find_packages, setup
 
 setup(
-    name="pytorch_pretrained_bert",
-    version="0.4.0",
-    author="Thomas Wolf, Victor Sanh, Tim Rault, Google AI Language Team Authors",
+    name="pytorch_transformers",
+    version="1.0.0",
+    author="Thomas Wolf, Lysandre Debut, Victor Sanh, Tim Rault, Google AI Language Team Authors, Open AI team Authors",
     author_email="thomas@huggingface.co",
-    description="PyTorch version of Google AI BERT model with script to load Google pre-trained models",
+    description="Repository of pre-trained NLP Transformer models: BERT, GPT & GPT-2, Transformer-XL, XLNet and XLM",
     long_description=open("README.md", "r", encoding='utf-8').read(),
     long_description_content_type="text/markdown",
-    keywords='BERT NLP deep learning google',
+    keywords='NLP deep learning transformer pytorch BERT GPT GPT-2 google openai CMU',
     license='Apache',
-    url="https://github.com/huggingface/pytorch-pretrained-BERT",
+    url="https://github.com/huggingface/pytorch-transformers",
     packages=find_packages(exclude=["*.tests", "*.tests.*",
                                     "tests.*", "tests"]),
     install_requires=['torch>=0.4.1',
                       'numpy',
                       'boto3',
                       'requests',
-                      'tqdm'],
+                      'tqdm',
+                      'regex',
+                      'sentencepiece'],
     entry_points={
       'console_scripts': [
-        "pytorch_pretrained_bert=pytorch_pretrained_bert.__main__:main"
+        "pytorch_transformers=pytorch_transformers.__main__:main",
       ]
     },
-    python_requires='>=3.5.0',
+    # python_requires='>=3.5.0',
     tests_require=['pytest'],
     classifiers=[
           'Intended Audience :: Science/Research',
