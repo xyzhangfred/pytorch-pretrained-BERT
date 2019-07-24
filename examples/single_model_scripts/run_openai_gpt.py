@@ -114,7 +114,7 @@ def main():
 
     parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
-    args = parser.parse_args()
+    args = parser.parse_args(['--output_dir', './'])
     print(args)
 
     if args.server_ip and args.server_port:

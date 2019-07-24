@@ -721,8 +721,7 @@ def main():
         if args.local_rank == -1:
             train_sampler = RandomSampler(train_dataset)
         else:
-            #TODO: check if this works with current data generator from disk that relies on file.__next__
-            # (it doesn't return item back by index)
+
             train_sampler = DistributedSampler(train_dataset)
         train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size)
 
