@@ -155,7 +155,7 @@ class GPT2_adverse(GPT2LMHeadModel):
         hidden_states = torch.cat((syn_hidden_states, sem_hidden_states), dim=-1)
         lm_logits = self.lm_head(hidden_states)
 
-        outputs = (lm_logits,) + transformer_outputs[1:]
+        outputs = (lm_logits,) +(syn_hidden_states, sem_hidden_states)
         if labels is not None:
             # Shift so that tokens < n predict n
             shift_logits = lm_logits[..., :-1, :].contiguous()
@@ -174,14 +174,39 @@ class GPT2_adverse(GPT2LMHeadModel):
                             shift_pos_labels.view(-1))
             loss = loss_lm + loss_pos_syn - loss_pos_sem
             outputs = (loss,loss_pos_syn,loss_pos_sem, loss_lm) + outputs
-
         return outputs  # (loss), lm_logits, presents, (all hidden_states), (attentions)
+
+class ProbeModel(nn.Module):
+    def __init__(self, model, config):
+        super(ProbeModel, self).__init__()
+        self.model = model
+        self.probe_cls_fc1 = nn.Linear(config.n_embd, config.n_embd)
+        self.probe_cls_fc2 = nn.Linear(config.n_embd, config.pos_vocab_size)
+
+
+    def forward(self, input_ids, position_ids=None,pos_ids = None, token_type_ids=None, labels=None, past=None, head_mask=None):
+        model_outputs = self.model(input_ids, position_ids=None,pos_ids = None, token_type_ids=None, labels=None, past=None, head_mask=None)
+        sem_hid_state = model_outputs[-1]
+        syn_hid_states = model_outputs[-2]
+
+        #pos_logits = self.probe_cls_fc2(torch.relu(self.probe_cls_fc1(sem_hid_state)))
+        pos_logits = self.probe_cls_fc1(syn_hid_states)
+
+        shift_pos_logits = pos_logits[..., :-1, :].contiguous()
+        shift_pos_labels = pos_ids[..., 1:].contiguous()
+
+        loss_fct = CrossEntropyLoss(ignore_index=-1)
+        loss = loss_fct(shift_pos_logits.view(-1, shift_pos_logits.size(-1)),
+                                shift_pos_labels.view(-1))
+
+        return loss,shift_pos_logits
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, help="pretrained_model.")
     parser.add_argument("--do_train", action='store_true', help="Whether to run training.")
     parser.add_argument("--do_eval", action='store_true', help="Whether to run eval on the dev set.")
+    parser.add_argument("--do_probe", action='store_true', help="Whether to probe the representation we got.")
     parser.add_argument("--output_dir", default=None, type=str, required=True,
                         help="The output directory where the model predictions and checkpoints will be written.")
     parser.add_argument('--data_dir', type=str, default='/home/xiongyi/dataxyz/repos/SemSynLSTM/word_language_model/data/wikitext-2/')
@@ -200,7 +225,8 @@ def main():
     timenow = datetime.datetime.now().strftime("%b%d%H%M")
     model_option = 'adv'
     outdir = model_option + timenow
-    args = parser.parse_args(['--output_dir', outdir,'--do_eval', '--do_train', '--num_train_epochs', '50'])
+
+    args = parser.parse_args(['--output_dir', outdir, '--do_probe', '--num_train_epochs', '50'])
     #args = parser.parse_args(['--output_dir', './tmp', '--do_eval', '--model_name', 'gpt2'])
     print(args)
 
@@ -213,7 +239,7 @@ def main():
     n_gpu = torch.cuda.device_count()
     logger.info("device: {}, n_gpu {}".format(device, n_gpu))
 
-    if not args.do_train and not args.do_eval:
+    if not args.do_train and not args.do_eval and not args.do_probe:
         raise ValueError("At least one of `do_train` or `do_eval` must be True.")
 
     if not os.path.exists(args.output_dir):
@@ -331,8 +357,30 @@ def main():
                 exp_average_loss = loss.item() if exp_average_loss is None else 0.7 * exp_average_loss + 0.3 * loss.item()
                 nb_tr_steps += 1
                 tqdm_bar.desc = "Training loss: {:.2e} sem: {:.2e} lm: {:.2e}".format(exp_average_loss, loss_sem.item(), loss_lm.item())
-
+        print(train_results)
     # Save a trained model
+    if args.do_train:
+        all_param = list(model.named_parameters())
+        param_optimizer = [(n,p) for n,p in all_param if 'pos_head_adv' not in n]
+        param_optimizer_adv = [(n,p) for n,p in all_param if 'pos_head_adv' in n]
+        no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+            {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        ]
+
+        optimizer_adv_grouped_parameters = [
+            {'params': [p for n, p in param_optimizer_adv if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+            {'params': [p for n, p in param_optimizer_adv if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        ]
+        num_train_optimization_steps = len(train_dataloader) * args.num_train_epochs
+        optimizer = AdamW(optimizer_grouped_parameters,lr=args.learning_rate,
+                          #max_grad_norm=args.max_grad_norm,
+                          weight_decay=args.weight_decay)
+                          #t_total=num_train_optimization_steps)
+        optimizer_adv = AdamW(optimizer_adv_grouped_parameters,lr=args.learning_rate,
+                          #max_grad_norm=args.max_grad_norm,
+                          weight_decay=args.weight_decay)
     if args.do_train:
         # Save a trained model, configuration and tokenizer
         model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
@@ -349,7 +397,7 @@ def main():
         model = GPT2LMHeadModel.from_pretrained(args.output_dir)
         #tokenizer = OpenAIGPTTokenizer.from_pretrained(args.output_dir)
         model.to(device)
-    print (train_results)
+
     if args.do_eval:
         model.eval()
         nb_eval_steps, nb_eval_examples = 0, 0
@@ -371,6 +419,76 @@ def main():
         result = {'eval_perp': perp}
         logger.info("***** Eval results *****")
         logger.info("'eval_perp' = %s", str(result['eval_perp']))
+
+    if args.do_probe:
+
+        ##load model (how???)
+        model_path = '/home/xiongyi/dataxyz/repos/pytorch-pretrained-BERT/examples/advJul232307/pytorch_model.bin'
+        model.load_state_dict(torch.load(model_path))
+        ##Add a mlp to the representation
+
+        probe_model = ProbeModel(model, config)
+        probe_model.to(device)
+        ##train and eval
+        all_param = list(probe_model.named_parameters())
+        param_probe = [(n, p) for n, p in all_param if 'probe_cls' in n]
+        no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in param_probe if not any(nd in n for nd in no_decay)],
+             'weight_decay': 0.01},
+            {'params': [p for n, p in param_probe if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        ]
+        optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate,
+                          # max_grad_norm=args.max_grad_norm,
+                          weight_decay=args.weight_decay)
+        # t_total=num_train_optimization_steps)
+        train_results = {}
+        nb_tr_steps, tr_loss, exp_average_loss = 0, 0, None
+        for epoch in trange(int(args.num_train_epochs), desc="Epoch"):
+            ###eval on eval set
+            probe_model.eval()
+            nb_eval_steps, nb_eval_examples = 0, 0
+            average_loss = 0
+            average_acc = 0
+            for batch in tqdm(eval_dataloader, desc="Evaluating"):
+                batch = tuple(t.to(device) for t in batch)
+                input_ids, input_pos_ids = batch
+
+                with torch.no_grad():
+                    #breakpoint()
+                    loss = probe_model(input_ids, labels=input_ids, pos_ids=input_pos_ids)[0].detach().cpu().numpy()
+                    pos_logits = probe_model(input_ids, labels=input_ids, pos_ids=input_pos_ids)[1].detach().cpu().numpy()
+                    predicted_labels = np.argmax(pos_logits, -1)
+                    correct_rate = np.mean(predicted_labels == input_pos_ids.detach().cpu().numpy()[:,1:])
+                    average_acc += correct_rate
+                    average_loss += loss
+                nb_eval_steps += 1
+            average_loss /= nb_eval_steps
+            ##TODO Hard CODED!
+            average_acc /= nb_eval_steps
+            print('loss', average_loss,' acc_rate ', average_acc, ' epoch ', epoch)
+            train_results[epoch] = (average_loss, average_acc)
+
+            probe_model.train()
+
+            tr_loss = 0
+            nb_tr_steps = 0
+            tqdm_bar = tqdm(train_dataloader, desc="Training")
+            for step, batch in enumerate(tqdm_bar):
+                batch = tuple(t.to(device) for t in batch)
+                input_ids, input_pos_ids = batch
+                loss = probe_model(input_ids, labels=input_ids, pos_ids=input_pos_ids)[0]
+
+                # breakpoint()
+                # loss = args.lm_coef * losses[0] + losses[1]
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                tr_loss += loss.item()
+                exp_average_loss = loss.item() if exp_average_loss is None else 0.7 * exp_average_loss + 0.3 * loss.item()
+                nb_tr_steps += 1
+                tqdm_bar.desc = "Training loss: {:.2e}".format(exp_average_loss)
+
 
 
 if __name__ == '__main__':

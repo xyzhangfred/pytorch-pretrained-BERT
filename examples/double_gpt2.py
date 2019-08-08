@@ -110,6 +110,30 @@ class TaggedCorpus(object):
                         pos_token += 1
         return ids,pos_ids
 
+class ProbeModel(nn.Module):
+    def __init__(self, model, config):
+        super(ProbeModel, self).__init__()
+        self.model = model
+        self.probe_cls_fc1 = nn.Linear(config.n_embd, config.n_embd)
+        self.probe_cls_fc2 = nn.Linear(config.n_embd, config.pos_vocab_size)
+
+
+    def forward(self, input_ids, position_ids=None,pos_ids = None, token_type_ids=None, labels=None, past=None, head_mask=None):
+        model_outputs = self.model(input_ids, position_ids=None,pos_ids = None, token_type_ids=None, labels=None, past=None, head_mask=None)
+        sem_hid_state = model_outputs[-1]
+        syn_hid_states = model_outputs[-2]
+
+        pos_logits = self.probe_cls_fc2(torch.relu(self.probe_cls_fc1(syn_hid_states)))
+        #pos_logits = self.probe_cls_fc1(sem_hid_state)
+
+        shift_pos_logits = pos_logits[..., :-1, :].contiguous()
+        shift_pos_labels = pos_ids[..., 1:].contiguous()
+
+        loss_fct = CrossEntropyLoss(ignore_index=-1)
+        loss = loss_fct(shift_pos_logits.view(-1, shift_pos_logits.size(-1)),
+                                shift_pos_labels.view(-1))
+
+        return loss,shift_pos_logits
 
 def load_tokenize_and_batchify(data_dir = '../SemSynLSTM/word_language_model/data/wikitext-2/', input_len = 128):
     """
@@ -165,14 +189,9 @@ class WrapperLMHead(GPT2LMHeadModel):
             hidden_states = torch.cat((syn_hidden_states, sem_hidden_states), dim=-1)
         elif self.model_option == 'syn_only':
             hidden_states = syn_hidden_states
-        elif self.model_option == 'adverse':
-            sem_transformer_outputs = self.sem_transformer(input_ids, position_ids=None,
-                                                           token_type_ids=token_type_ids,
-                                                           past=past, head_mask=head_mask)
-            sem_hidden_states = sem_transformer_outputs[0]
         lm_logits1 = self.lm_head(hidden_states)
         pos_logits = self.pos_head(syn_hidden_states)
-        outputs = (lm_logits1,) + (hidden_states,)
+        outputs = (lm_logits1,) + (hidden_states,syn_hidden_states, sem_hidden_states)
         if labels is not None and pos_ids is not None:
             # Shift so that tokens < n predict n
 
@@ -198,6 +217,7 @@ def main():
     parser.add_argument("--model_option", type=str, default='gpt-2-2', help="pretrained_model.")
     parser.add_argument("--do_train", action='store_true', help="Whether to run training.")
     parser.add_argument("--do_eval", action='store_true', help="Whether to run eval on the dev set.")
+    parser.add_argument("--do_probe", action='store_true', help="Whether to run probing.")
     parser.add_argument("--output_dir", default=None, type=str, required=True,
                         help="The output directory where the model predictions and checkpoints will be written.")
     parser.add_argument('--data_dir', type=str, default='/home/xiongyi/dataxyz/repos/SemSynLSTM/word_language_model/data/wikitext-2/')
@@ -214,9 +234,9 @@ def main():
     parser.add_argument('--n_valid', type=int, default=374)
 
     timenow = datetime.datetime.now().strftime("%b%d%H%M")
-    model_option = 'syn_only'
+    model_option = 'gpt_2_2'
     outdir = model_option + timenow
-    args = parser.parse_args(['--output_dir', outdir,'--do_eval', '--do_train', '--num_train_epochs', '50', '--model_option',model_option])
+    args = parser.parse_args(['--output_dir', outdir,'--do_probe','--num_train_epochs', '10', '--model_option',model_option])
     #args = parser.parse_args(['--output_dir', './tmp', '--do_eval', '--model_name', 'gpt2'])
     print(args)
 
@@ -229,8 +249,6 @@ def main():
     n_gpu = torch.cuda.device_count()
     logger.info("device: {}, n_gpu {}".format(device, n_gpu))
 
-    if not args.do_train and not args.do_eval:
-        raise ValueError("At least one of `do_train` or `do_eval` must be True.")
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
@@ -353,7 +371,7 @@ def main():
         model = GPT2LMHeadModel.from_pretrained(args.output_dir)
         #tokenizer = OpenAIGPTTokenizer.from_pretrained(args.output_dir)
         model.to(device)
-    print (train_results)
+        print (train_results)
     if args.do_eval:
         model.eval()
         nb_eval_steps, nb_eval_examples = 0, 0
@@ -382,6 +400,71 @@ def main():
         #         logger.info("  %s = %s", key, str(result[key]))
         #         writer.write("%s = %s\n" % (key, str(result[key])))
 
+    if args.do_probe:
 
+        ##load model (how???)
+        model_path = '/home/xiongyi/dataxyz/repos/pytorch-pretrained-BERT/examples/gpt2_2_jul22/pytorch_model.bin_double'
+        model.load_state_dict(torch.load(model_path))
+        ##Add a mlp to the representation
+
+        probe_model = ProbeModel(model, config)
+        probe_model.to(device)
+        ##train and eval
+        all_param = list(probe_model.named_parameters())
+        param_probe = [(n, p) for n, p in all_param if 'probe_cls' in n]
+        no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in param_probe if not any(nd in n for nd in no_decay)],
+             'weight_decay': 0.01},
+            {'params': [p for n, p in param_probe if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        ]
+        optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate,
+                          # max_grad_norm=args.max_grad_norm,
+                          weight_decay=args.weight_decay)
+        # t_total=num_train_optimization_steps)
+        train_results = {}
+        nb_tr_steps, tr_loss, exp_average_loss = 0, 0, None
+        for epoch in trange(int(args.num_train_epochs), desc="Epoch"):
+            ###eval on eval set
+            probe_model.eval()
+            nb_eval_steps, nb_eval_examples = 0, 0
+            average_loss = 0
+            average_acc = 0
+            for batch in tqdm(eval_dataloader, desc="Evaluating"):
+                batch = tuple(t.to(device) for t in batch)
+                input_ids, input_pos_ids = batch
+
+                with torch.no_grad():
+                    #breakpoint()
+                    loss = probe_model(input_ids, labels=input_ids, pos_ids=input_pos_ids)[0].detach().cpu().numpy()
+                    pos_logits = probe_model(input_ids, labels=input_ids, pos_ids=input_pos_ids)[1].detach().cpu().numpy()
+                    predicted_labels = np.argmax(pos_logits, -1)
+                    correct_rate = np.mean(predicted_labels == input_pos_ids.detach().cpu().numpy()[:,1:])
+                    average_acc += correct_rate
+                    average_loss += loss
+                nb_eval_steps += 1
+            average_loss /= nb_eval_steps
+            average_acc /= nb_eval_steps
+            print('loss', average_loss,' acc_rate ', average_acc, ' epoch ', epoch)
+            train_results[epoch] = (average_loss, average_acc)
+
+            probe_model.train()
+
+            tr_loss = 0
+            nb_tr_steps = 0
+            tqdm_bar = tqdm(train_dataloader, desc="Training")
+            for step, batch in enumerate(tqdm_bar):
+                batch = tuple(t.to(device) for t in batch)
+                input_ids, input_pos_ids = batch
+                loss = probe_model(input_ids, labels=input_ids, pos_ids=input_pos_ids)[0]
+                # breakpoint()
+                # loss = args.lm_coef * losses[0] + losses[1]
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                tr_loss += loss.item()
+                exp_average_loss = loss.item() if exp_average_loss is None else 0.7 * exp_average_loss + 0.3 * loss.item()
+                nb_tr_steps += 1
+                tqdm_bar.desc = "Training loss: {:.2e}".format(exp_average_loss)
 if __name__ == '__main__':
     main()

@@ -266,6 +266,10 @@ def main():
 
             all_encoder_layers, _ = model(input_ids, token_type_ids=None, attention_mask=input_mask)
             all_encoder_layers = all_encoder_layers
+            all_layers.append(layers)
+            out_features = collections.OrderedDict()
+            out_features["token"] = token
+            out_features["layers"] = all_layers
 
             for b, example_index in enumerate(example_indices):
                 feature = features[example_index.item()]
@@ -284,10 +288,6 @@ def main():
                         layers["values"] = [
                             round(x.item(), 6) for x in layer_output[i]
                         ]
-                        all_layers.append(layers)
-                    out_features = collections.OrderedDict()
-                    out_features["token"] = token
-                    out_features["layers"] = all_layers
                     all_out_features.append(out_features)
                 output_json["features"] = all_out_features
                 writer.write(json.dumps(output_json) + "\n")
